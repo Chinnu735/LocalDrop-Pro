@@ -1,0 +1,47 @@
+{
+  "name": "localdrop-pro",
+  "version": "1.0.0",
+  "description": "Ultra-secure, cross-platform local file drop Progressive Web App (PWA) using WebRTC and Framer Motion.  Built to serve as an \"AirDrop for everything\" (Windows, macOS, Linux, Android, iOS) with a gorgeous Void Black and Neon Purple aesthetic.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "build": {
+    "appId": "com.localdrop.pro",
+    "productName": "LocalDrop Pro",
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "files": [
+      "main.js",
+      "server/**/*",
+      "client/dist/**/*",
+      "node_modules/**/*"
+    ]
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Chinnu735/LocalDrop-Pro.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Chinnu735/LocalDrop-Pro/issues"
+  },
+  "homepage": "https://github.com/Chinnu735/LocalDrop-Pro#readme",
+  "dependencies": {
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "socket.io": "^4.8.3"
+  },
+  "devDependencies": {
+    "electron": "^42.3.3",
+    "electron-builder": "^26.15.0"
+  }
+}
