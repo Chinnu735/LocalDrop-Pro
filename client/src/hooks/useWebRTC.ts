@@ -16,6 +16,7 @@ export const useWebRTC = () => {
   const [socket, setSocket] = useState<Socket | null>(null);
   const [peers, setPeers] = useState<Peer[]>([]);
   const [activeTransfers, setActiveTransfers] = useState<Record<string, FileTransfer>>({});
+  const [myPin] = useState<string>(() => Math.floor(1000 + Math.random() * 9000).toString());
   
   const peerConnections = useRef<Map<string, RTCPeerConnection>>(new Map());
   const dataChannels = useRef<Map<string, RTCDataChannel>>(new Map());
@@ -34,12 +35,10 @@ export const useWebRTC = () => {
 
     newSocket.on('current_peers', (currentPeers: Peer[]) => {
       setPeers(currentPeers);
-      currentPeers.forEach(peer => createPeerConnection(peer.id, newSocket, true));
     });
 
     newSocket.on('peer_joined', (peer: Peer) => {
       setPeers(prev => [...prev, peer]);
-      createPeerConnection(peer.id, newSocket, false);
     });
 
     newSocket.on('peer_left', (peerId: string) => {
@@ -54,14 +53,22 @@ export const useWebRTC = () => {
     });
 
     // WebRTC Signaling Handlers
-    newSocket.on('webrtc_offer', async ({ senderId, offer }) => {
-      const pc = peerConnections.current.get(senderId);
-      if (pc) {
-        await pc.setRemoteDescription(new RTCSessionDescription(offer));
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-        newSocket.emit('webrtc_answer', { targetId: senderId, answer });
+    newSocket.on('webrtc_offer', async ({ senderId, offer, pin }) => {
+      if (pin !== myPin) {
+        newSocket.emit('pin_rejected', { targetId: senderId });
+        return;
       }
+
+      // Accept offer and create connection on demand for receiver
+      let pc = peerConnections.current.get(senderId);
+      if (!pc) {
+        pc = createReceiverConnection(senderId, newSocket);
+      }
+      
+      await pc.setRemoteDescription(new RTCSessionDescription(offer));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      newSocket.emit('webrtc_answer', { targetId: senderId, answer });
     });
 
     newSocket.on('webrtc_answer', async ({ senderId, answer }) => {
@@ -69,6 +76,14 @@ export const useWebRTC = () => {
       if (pc) {
         await pc.setRemoteDescription(new RTCSessionDescription(answer));
       }
+    });
+
+    newSocket.on('pin_rejected', ({ senderId }) => {
+      alert('Incorrect PIN entered! Transfer denied by target device.');
+      const pc = peerConnections.current.get(senderId);
+      if (pc) pc.close();
+      peerConnections.current.delete(senderId);
+      dataChannels.current.delete(senderId);
     });
 
     newSocket.on('webrtc_ice_candidate', async ({ senderId, candidate }) => {
@@ -86,11 +101,9 @@ export const useWebRTC = () => {
     };
   }, []);
 
-  const createPeerConnection = async (peerId: string, socketInstance: Socket, isInitiator: boolean) => {
+  const createReceiverConnection = (peerId: string, socketInstance: Socket) => {
     const pc = new RTCPeerConnection({
-      iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-      ],
+      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
     });
 
     pc.onicecandidate = (event) => {
@@ -99,22 +112,47 @@ export const useWebRTC = () => {
       }
     };
 
-    if (isInitiator) {
-      const dc = pc.createDataChannel('fileTransfer');
-      setupDataChannel(dc, peerId);
-      dataChannels.current.set(peerId, dc);
-
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      socketInstance.emit('webrtc_offer', { targetId: peerId, offer });
-    } else {
-      pc.ondatachannel = (event) => {
-        setupDataChannel(event.channel, peerId);
-        dataChannels.current.set(peerId, event.channel);
-      };
-    }
+    pc.ondatachannel = (event) => {
+      setupDataChannel(event.channel, peerId);
+      dataChannels.current.set(peerId, event.channel);
+    };
 
     peerConnections.current.set(peerId, pc);
+    return pc;
+  };
+
+  const initiateTransfer = async (peerId: string, file: File, targetPin: string) => {
+    if (!socket) return;
+    
+    // Clean up old connection if exists
+    if (peerConnections.current.has(peerId)) {
+      peerConnections.current.get(peerId)?.close();
+    }
+
+    const pc = new RTCPeerConnection({
+      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+    });
+
+    pc.onicecandidate = (event) => {
+      if (event.candidate) {
+        socket.emit('webrtc_ice_candidate', { targetId: peerId, candidate: event.candidate });
+      }
+    };
+
+    const dc = pc.createDataChannel('fileTransfer');
+    setupDataChannel(dc, peerId);
+    dataChannels.current.set(peerId, dc);
+
+    peerConnections.current.set(peerId, pc);
+
+    // Wait for data channel to open before sending file
+    dc.onopen = () => {
+      sendFile(peerId, file, dc);
+    };
+
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    socket.emit('webrtc_offer', { targetId: peerId, offer, pin: targetPin });
   };
 
   const setupDataChannel = (dc: RTCDataChannel, peerId: string) => {
@@ -173,10 +211,9 @@ export const useWebRTC = () => {
     };
   };
 
-  const sendFile = (peerId: string, file: File) => {
-    const dc = dataChannels.current.get(peerId);
+  const sendFile = (peerId: string, file: File, dc: RTCDataChannel) => {
     if (!dc || dc.readyState !== 'open') {
-      alert('Connection to peer not fully established yet. Please wait a moment.');
+      alert('Data channel failed to open.');
       return;
     }
 
@@ -237,5 +274,5 @@ export const useWebRTC = () => {
     readSlice(0);
   };
 
-  return { peers, sendFile, activeTransfers };
+  return { peers, initiateTransfer, activeTransfers, myPin };
 };

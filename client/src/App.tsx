@@ -1,11 +1,17 @@
 import React, { useCallback, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useWebRTC } from './hooks/useWebRTC';
-import { MonitorSmartphone, Upload, CheckCircle2, Loader2, ShieldCheck } from 'lucide-react';
+import { MonitorSmartphone, Upload, CheckCircle2, Loader2, ShieldCheck, Lock } from 'lucide-react';
 
 function App() {
-  const { peers, sendFile, activeTransfers } = useWebRTC();
+  const { peers, initiateTransfer, activeTransfers, myPin } = useWebRTC();
   const [draggedOverPeer, setDraggedOverPeer] = useState<string | null>(null);
+  
+  // PIN Modal State
+  const [pinModal, setPinModal] = useState<{ isOpen: boolean, peerId: string | null, file: File | null }>({
+    isOpen: false, peerId: null, file: null
+  });
+  const [enteredPin, setEnteredPin] = useState('');
 
   const handleDragOver = useCallback((e: React.DragEvent, peerId: string) => {
     e.preventDefault();
@@ -21,14 +27,22 @@ function App() {
     e.preventDefault();
     setDraggedOverPeer(null);
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      const file = e.dataTransfer.files[0];
-      sendFile(peerId, file);
+      setPinModal({ isOpen: true, peerId, file: e.dataTransfer.files[0] });
     }
-  }, [sendFile]);
+  }, []);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>, peerId: string) => {
     if (e.target.files && e.target.files.length > 0) {
-      sendFile(peerId, e.target.files[0]);
+      setPinModal({ isOpen: true, peerId, file: e.target.files[0] });
+    }
+  };
+
+  const handlePinSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (pinModal.peerId && pinModal.file && enteredPin.length === 4) {
+      initiateTransfer(pinModal.peerId, pinModal.file, enteredPin);
+      setPinModal({ isOpen: false, peerId: null, file: null });
+      setEnteredPin('');
     }
   };
 
@@ -48,7 +62,12 @@ function App() {
         <h1 className="text-5xl font-extrabold tracking-tight mb-4 flex items-center justify-center gap-3">
           LocalDrop <span className="text-primary">Pro</span>
         </h1>
-        <p className="text-gray-400 text-lg max-w-md mx-auto flex items-center justify-center gap-2">
+        <div className="bg-surface/50 border border-primary/30 px-6 py-2 rounded-full inline-flex items-center gap-3 mb-4 backdrop-blur-md">
+          <Lock className="w-4 h-4 text-primary" />
+          <span className="text-gray-300">Your Device PIN:</span>
+          <span className="text-2xl font-mono text-white tracking-widest font-bold">{myPin}</span>
+        </div>
+        <p className="text-gray-400 text-lg max-w-md mx-auto flex items-center justify-center gap-2 mt-2">
           <ShieldCheck className="w-5 h-5 text-accent" />
           End-to-End Encrypted Local Transfer
         </p>
@@ -160,6 +179,64 @@ function App() {
           )}
         </AnimatePresence>
       </div>
+
+      {/* PIN Entry Modal */}
+      <AnimatePresence>
+        {pinModal.isOpen && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
+          >
+            <motion.div 
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.9, y: 20 }}
+              className="bg-surface border border-white/10 rounded-3xl p-8 w-full max-w-md shadow-2xl"
+            >
+              <div className="flex flex-col items-center text-center">
+                <div className="w-16 h-16 bg-primary/20 rounded-full flex items-center justify-center mb-6">
+                  <Lock className="w-8 h-8 text-primary" />
+                </div>
+                <h3 className="text-2xl font-bold mb-2">Enter Security PIN</h3>
+                <p className="text-gray-400 mb-8">
+                  Check the screen of the receiving device and enter its 4-digit PIN to securely transfer <span className="text-white font-medium">{pinModal.file?.name}</span>.
+                </p>
+
+                <form onSubmit={handlePinSubmit} className="w-full flex flex-col gap-6">
+                  <input
+                    type="text"
+                    maxLength={4}
+                    autoFocus
+                    value={enteredPin}
+                    onChange={(e) => setEnteredPin(e.target.value.replace(/\D/g, ''))}
+                    className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-4 text-center text-3xl font-mono tracking-[1em] text-white focus:outline-none focus:border-primary transition-colors placeholder:text-gray-700"
+                    placeholder="••••"
+                  />
+                  
+                  <div className="flex gap-4 w-full">
+                    <button 
+                      type="button"
+                      onClick={() => { setPinModal({ isOpen: false, peerId: null, file: null }); setEnteredPin(''); }}
+                      className="flex-1 py-3 rounded-xl bg-white/5 hover:bg-white/10 transition-colors font-medium"
+                    >
+                      Cancel
+                    </button>
+                    <button 
+                      type="submit"
+                      disabled={enteredPin.length !== 4}
+                      className="flex-1 py-3 rounded-xl bg-primary hover:bg-primary/80 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium text-white shadow-[0_0_20px_rgba(157,78,221,0.4)]"
+                    >
+                      Send File
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
